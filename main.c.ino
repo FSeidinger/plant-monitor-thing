@@ -1,3 +1,4 @@
+#include <ESP8266WiFi.h>
 #include <ArduinoJson.h>
 
 typedef enum CommandStatus {
@@ -25,9 +26,6 @@ void loop() {
 		}
 	}
 
-	int plantSensorReading = analogRead(A0);
-	Serial.println(String("Sesor reading: ") + String(plantSensorReading));
-
 	delay(1000);
 }
 
@@ -45,7 +43,14 @@ boolean isCommandRead(Stream & stream) {
 
 		case CommandStatus_CommandStarted:
 			if (isWhiteSpace(stream.peek())) {
+				// command is completely read
 				commandStatus = CommandStatus_CommandFinished;
+			}
+			else {
+				if (command.length() < 32) {
+					// add next character to command
+					command = command + String((char) stream.read());
+				}
 			}
 			break;
 	}
@@ -64,13 +69,18 @@ boolean isWhiteSpace(char c) {
 
 void parseCommand(String command, Stream & stream) {
 	if (command.compareTo("reset") == 0) {
-		stream.println("Plant guard reset");
+		WiFi.disconnect();
+		stream.println("Plant Guard reset");
 	}
 	else if (command.compareTo("configure") == 0) {
 		parseConfiguration(stream);
 	}
 	else if (command.compareTo("save") == 0) {
-		stream.println("Plant guard configuration saved");
+		stream.println("Plant Guard configuration saved");
+	}
+	else if (command.compareTo("read") == 0) {
+		int plantSensorReading = analogRead(A0);
+		Serial.println(String("Sesor reading: ") + String(plantSensorReading));
 	}
 	else {
 		stream.println(String("Received unknown command \"") + String(command) + String("\""));
@@ -86,10 +96,11 @@ void parseConfiguration(Stream & stream) {
 	String password = root["password"];
 
 	if ((ssid.length() > 0) && (password.length() > 0)) {
-		stream.println(String("Plant guard configured with ssid ") + String(ssid) + String(" and password ") + String(password));
+		stream.println("Plant Guard configured");
+		connectWiFi(ssid, password);
 	}
 	else {
-		stream.println("SSID or password for Plant guard must not be empty");
+		stream.println("SSID or password for Plant Guard must not be empty");
 		stream.println("");
 		stream.println("Syntax:");
 		stream.println("");
@@ -98,4 +109,37 @@ void parseConfiguration(Stream & stream) {
 		stream.println("  \"password\":\"network password\"");
 		stream.println("}");
 	}
+}
+
+void connectWiFi(String ssid, String password)
+{
+	String macAddress = WiFi.macAddress();
+	macAddress.toLowerCase();
+
+	Serial.println();
+	Serial.println("Connecting to: " + ssid + String(" using mac address ") + macAddress);
+
+	WiFi.mode(WIFI_STA);
+	WiFi.begin(ssid.c_str(), password.c_str());
+
+	Serial.print("Connecting ");
+
+	for (int i = 1; (i < 60 && WiFi.status() != WL_CONNECTED); i++) {
+		Serial.print(".");
+		delay(1000);
+	}
+
+	Serial.println();
+
+	if (WiFi.status() == WL_CONNECTED) {
+		Serial.println(String("WiFi connection to ") + quoteString(ssid) + String(" was successful."));
+		Serial.println(String("Using ip address ") + String(WiFi.localIP().toString()));
+	}
+	else {
+		Serial.println(String("Connection to ") + quoteString(ssid) + String(" failed"));
+	}
+}
+
+String quoteString(String string) {
+	return String("\"") + string + String("\"");
 }
