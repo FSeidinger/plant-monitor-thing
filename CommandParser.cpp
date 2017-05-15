@@ -2,8 +2,34 @@
 
 using namespace Infrastructure;
 
+CommandDefinition::CommandDefinition() {
+    undefined = true;
+}
+
+CommandDefinition::CommandDefinition(String & commandRef, CommandHandlerFunction & commandHandlerRef) {
+    command = commandRef;
+    commandHandler = commandHandlerRef;
+    undefined = false;
+}
+
+String CommandDefinition::getCommand() {
+    return command;
+}
+
+bool CommandDefinition::isUndefined() {
+    return undefined;
+}
+
+void CommandDefinition::apply(Stream & stream) {
+    commandHandler(stream);
+}
+
 CommandParser::CommandParser(Stream & stream) : parserStream(stream) {
-    parserStream.println("Created command parser");
+}
+
+void CommandParser::addCommandDefinition(String command, CommandHandlerFunction commandHandler) {
+    commandDefinitions[commandCount] = CommandDefinition(command, commandHandler);
+    commandCount++;
 }
 
 void CommandParser::process() {
@@ -39,15 +65,27 @@ void CommandParser::process() {
                                 commandIndex++;
                             }
                         } else {
-                            parserStream.printf("Found command '%s'\n", command);
-                            parserState = matchedCommand;
+                            parserState = foundCommand;
                         }
-                        
+                    }
+                }
+                break;
+
+            case foundCommand: {
+                    CommandDefinition definition = findCommandDefinition();
+
+                    if (!definition.isUndefined()) {
+                        parserState = matchedCommand;
+                    } else {
+                        parserStream.printf("Unknown command '%s'\n", command);
+                        parserState = reset;
                     }
                 }
                 break;
 
             case matchedCommand: {
+                    CommandDefinition definition = findCommandDefinition();
+                    definition.apply(parserStream);
                     parserState = reset;
                 }
                 break;
@@ -76,3 +114,14 @@ bool CommandParser::isWhiteSpace() {
     return false;
 }
 
+CommandDefinition CommandParser::findCommandDefinition() {
+    for (int i = 0; i < commandCount; i++) {
+        CommandDefinition definition = commandDefinitions[i];
+
+        if (definition.getCommand().compareTo(String(command)) == 0) {
+            return definition;
+        }
+    }
+
+    return unknwonDefinition;
+}

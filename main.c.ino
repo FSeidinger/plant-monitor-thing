@@ -1,132 +1,183 @@
 #include <ESP8266WiFi.h>
 #include <ArduinoJson.h>
+#include <FS.h>
 #include "CommandParser.h"
 
 Infrastructure::CommandParser commandParser(Serial);
 
+String ssid = String();
+String password = String();
+bool isFSInitalized = false;
+
 void setup() {
     Serial.begin(115200);
+
+    Serial.println();
+    Serial.println();
+    Serial.println("Booting");
+
+    commandParser.addCommandDefinition(String("connect"), connectCommandHandler);
+    commandParser.addCommandDefinition(String("disconnect"), disconnectCommandHandler);
+    commandParser.addCommandDefinition(String("format"), formatCommandHandler);
+    commandParser.addCommandDefinition(String("status"), statusCommandHandler);
+    commandParser.addCommandDefinition(String("ssid"), ssidCommandHandler);
+    commandParser.addCommandDefinition(String("password"), passwordCommandHandler);
+    Serial.println("Parser initialised");
+
+
+    isFSInitalized = SPIFFS.begin();
+    Serial.println("Ready");
 }
 
 void loop() {
     commandParser.process();
-
-    delay(1000);
+    yield();
 }
 
-/*
-boolean isCommandRead(Stream & stream) {
-	switch (commandStatus) {
-		case CommandStatus_CommandInitalized:
-			// discard whitespace, if any
-			if (isWhiteSpace(stream.peek())) {
-				stream.read();
-			}
-			else {
-				commandStatus = CommandStatus_CommandStarted;
-			}
-			break;
+void ssidCommandHandler(Stream & stream) {
+    char ssidBuffer[64];
+    
+    parseString(stream, ssidBuffer, sizeof(ssidBuffer));
 
-		case CommandStatus_CommandStarted:
-			if (isWhiteSpace(stream.peek())) {
-				// command is completely read
-				commandStatus = CommandStatus_CommandFinished;
-			}
-			else {
-				if (command.length() < 32) {
-					// add next character to command
-					command = command + String((char) stream.read());
-				}
-			}
-			break;
-	}
-
-	return commandStatus == CommandStatus_CommandFinished;
-}
-*/
-
-boolean isWhiteSpace(char c) {
-	if (c == ' ' || c == '\n') {
-		return true;
-	}
-	else {
-		return false;
-	}
+    if (strlen(ssidBuffer) > 0) {
+        stream.println("SSID configured");
+        ssid = String(ssidBuffer);
+    } else {
+        stream.println("SSId must not be empty");
+    }
 }
 
-void parseCommand(String command, Stream & stream) {
-	if (command.compareTo("reset") == 0) {
-		WiFi.disconnect();
-		stream.println("Plant Guard reset");
-	}
-	else if (command.compareTo("configure") == 0) {
-		parseConfiguration(stream);
-	}
-	else if (command.compareTo("save") == 0) {
-		stream.println("Plant Guard configuration saved");
-	}
-	else if (command.compareTo("read") == 0) {
-		int plantSensorReading = analogRead(A0);
-		Serial.println(String("Sesor reading: ") + String(plantSensorReading));
-	}
-	else {
-		stream.println(String("Received unknown command \"") + String(command) + String("\""));
-	}
+void passwordCommandHandler(Stream & stream) {
+    char passwordBuffer[64];
+
+    parseString(stream, passwordBuffer, sizeof(passwordBuffer));
+
+    if (strlen(passwordBuffer) > 0) {
+        stream.println("Password configured");
+        password = String(passwordBuffer);
+    } else {
+        stream.println("Password must not be empty");
+    }
 }
 
-void parseConfiguration(Stream & stream) {
-	StaticJsonBuffer<512> jsonBuffer;
-
-	JsonObject& root = jsonBuffer.parse(stream);
-
-	String ssid = root["ssid"];
-	String password = root["password"];
-
+void connectCommandHandler(Stream & stream) {
 	if ((ssid.length() > 0) && (password.length() > 0)) {
-		stream.println("Plant Guard configured");
-		connectWiFi(ssid, password);
+        disconnectCommandHandler(stream);
+		connectWiFi(stream, ssid, password);
 	}
 	else {
-		stream.println("SSID or password for Plant Guard must not be empty");
-		stream.println("");
-		stream.println("Syntax:");
-		stream.println("");
-		stream.println("configure {");
-		stream.println("  \"ssid\":\"network ssid\",");
-		stream.println("  \"password\":\"network password\"");
-		stream.println("}");
+		stream.println("For a connection SSID and password must be configured");
 	}
 }
 
-void connectWiFi(String ssid, String password)
-{
-	String macAddress = WiFi.macAddress();
-	macAddress.toLowerCase();
+void disconnectCommandHandler(Stream & stream) {
+    if (WiFi.status() == WL_CONNECTED) {
+        WiFi.disconnect(true);
+        stream.println("Disconnected");
+    }
+}
 
-	Serial.println();
-	Serial.println("Connecting to: " + ssid + String(" using mac address ") + macAddress);
+void formatCommandHandler(Stream & stream) {
+    if (SPIFFS.format()) {
+        stream.println("File system formatted");
+
+        if (isFSInitalized == false) {
+            isFSInitalized = SPIFFS.begin();
+        }
+    } else {
+        stream.println("Formatting file system failed");
+    }
+}
+
+void statusCommandHandler(Stream & stream) {
+    if (WiFi.status() == WL_CONNECTED) {
+        stream.printf("Connected to '%s' using ip address '%s'\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+    } else {
+        stream.println("Disconnected");
+    }
+
+    if (isFSInitalized) {
+        stream.println("File system is formatted");
+    } else {
+        stream.println("File system is not formatted");
+    }
+
+    stream.printf("SSID configured to '%s'\n", ssid.c_str());
+
+    if (password.length() > 0) {
+        stream.println("Password is configured");
+    } else {
+        stream.println("Password is not configured");
+    }
+
+    stream.printf("Sesor reading is %d\n", getSensorReading());
+}
+
+int getSensorReading() {
+    return analogRead(A0);
+}
+
+void connectWiFi(Stream & stream, String ssid, String password)
+{
+    stream.println("Connecting to " + quoteString(ssid) + String(" using mac address ") + WiFi.macAddress());
 
 	WiFi.mode(WIFI_STA);
 	WiFi.begin(ssid.c_str(), password.c_str());
 
-	Serial.print("Connecting ");
-
 	for (int i = 1; (i < 60 && WiFi.status() != WL_CONNECTED); i++) {
-		Serial.print(".");
 		delay(1000);
 	}
 
-	Serial.println();
-
 	if (WiFi.status() == WL_CONNECTED) {
-		Serial.println(String("WiFi connection to ") + quoteString(ssid) + String(" was successful."));
-		Serial.println(String("Using ip address ") + String(WiFi.localIP().toString()));
-	}
-	else {
-		Serial.println(String("Connection to ") + quoteString(ssid) + String(" failed"));
-	}
+        stream.println(String("IP address is ") + String(WiFi.localIP().toString()));
+        stream.println(String("Connection to ") + quoteString(ssid) + String(" was successful."));
+    } else {
+        stream.println(String("Connection to ") + quoteString(ssid) + String(" failed"));
+    }
 }
 
 String quoteString(String string) {
 	return String("\"") + string + String("\"");
+}
+
+void parseString(Stream & stream, char * buffer, size_t size) {
+    int index = 0;
+    bool stringStartFound = false;
+    bool stringEndFound = false;
+
+    while (!stringStartFound) {
+        int nextChar = stream.read();
+
+        switch (nextChar) {
+            case '"':
+                stringStartFound = true;
+                break;
+
+            default:
+                yield();
+                break;
+        }
+    }
+
+    while (!stringEndFound) {
+        int nextChar = stream.read();
+
+        switch (nextChar) {
+            case -1:
+                yield();
+                break;
+
+            case '"':
+                stringEndFound = true;
+                break;
+
+            default:
+                if (index < size - 1) {
+                    buffer[index] = nextChar;
+                    buffer[index + 1] = 0;
+                    index++;
+                }
+                break;
+        }
+    }
 }
