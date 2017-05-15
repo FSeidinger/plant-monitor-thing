@@ -1,6 +1,7 @@
 /*.sln
 /*.filters
 /*.vcxproj
-/Debug
-/__vm
 /.vs
+/__vm
+/Debug
+/Release

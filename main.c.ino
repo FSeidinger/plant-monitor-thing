@@ -1,34 +1,20 @@
 #include <ESP8266WiFi.h>
 #include <ArduinoJson.h>
+#include "CommandParser.h"
 
-typedef enum CommandStatus {
-	CommandStatus_CommandInitalized,
-	CommandStatus_CommandStarted,
-	CommandStatus_CommandFinished
-};
-
-String command;
-CommandStatus commandStatus;
+Infrastructure::CommandParser commandParser(Serial);
 
 void setup() {
-	command = "";
-	commandStatus = CommandStatus_CommandInitalized;
-
-	Serial.begin(115200);
+    Serial.begin(115200);
 }
 
 void loop() {
-	while (Serial.available() > 0) {
-		if (isCommandRead(Serial)) {
-			parseCommand(command, Serial);
-			commandStatus = CommandStatus_CommandInitalized;
-			command = "";
-		}
-	}
+    commandParser.process();
 
-	delay(1000);
+    delay(1000);
 }
 
+/*
 boolean isCommandRead(Stream & stream) {
 	switch (commandStatus) {
 		case CommandStatus_CommandInitalized:
@@ -57,6 +43,7 @@ boolean isCommandRead(Stream & stream) {
 
 	return commandStatus == CommandStatus_CommandFinished;
 }
+*/
 
 boolean isWhiteSpace(char c) {
 	if (c == ' ' || c == '\n') {
